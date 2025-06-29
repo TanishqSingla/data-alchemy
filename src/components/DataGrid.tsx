@@ -7,7 +7,7 @@ import {
 } from "@tanstack/react-table";
 import { useData } from "../context/DataContext";
 import { EntityType } from "../lib/types";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { exportToCSV, exportToXLSX } from "@/lib/export";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { buildAutoFixPrompt } from "@/lib/aiPrompts";
@@ -88,16 +88,23 @@ function getRowDiffs(original: any[], fixed: any[]): { rowIndex: number, changes
   return diffs;
 }
 
-function ReviewModal({ open, onClose, fixedRows, onApply, loading, originalRows }: {
+function ReviewModal({ open, onClose, fixedRows, onApply, loading, originalRows, errors }: {
   open: boolean;
   onClose: () => void;
   fixedRows: any[];
   onApply: (selected: number[]) => void;
   loading?: boolean;
   originalRows: any[];
+  errors: { rowIndex: number; field: string; message: string }[];
 }) {
   const diffs = useMemo(() => getRowDiffs(originalRows, fixedRows), [originalRows, fixedRows]);
-  const [selected, setSelected] = useState<number[]>(diffs.map(d => d.rowIndex));
+  const [selected, setSelected] = useState<number[]>([]);
+  useEffect(() => {
+    setSelected(diffs.map(d => d.rowIndex));
+  }, [diffs.length, open]);
+
+  const getRowErrors = (rowIdx: number) =>
+    errors.filter(e => e.rowIndex === rowIdx).map(e => `${e.field}: ${e.message}`);
 
   const toggle = (rowIdx: number) => {
     setSelected(sel => sel.includes(rowIdx) ? sel.filter(i => i !== rowIdx) : [...sel, rowIdx]);
@@ -127,6 +134,13 @@ function ReviewModal({ open, onClose, fixedRows, onApply, loading, originalRows 
                   />
                   <div>
                     <div className="font-semibold mb-1">Row {rowIndex + 1}</div>
+                    {getRowErrors(rowIndex).length > 0 && (
+                      <ul className="text-xs text-red-600 mb-1">
+                        {getRowErrors(rowIndex).map((msg, i) => (
+                          <li key={i}>{msg}</li>
+                        ))}
+                      </ul>
+                    )}
                     <ul className="text-xs space-y-1">
                       {changes.map(({ field, before, after }) => (
                         <li key={field}>
@@ -400,6 +414,7 @@ export function DataGrid({ type }: Props) {
         }}
         loading={aiLoading}
         originalRows={rows}
+        errors={entityErrors}
       />
       {entityErrors.length > 0 && (
         <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3">
