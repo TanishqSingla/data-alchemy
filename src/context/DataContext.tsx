@@ -113,22 +113,18 @@ export function DataProvider({ children }: { children: ReactNode }) {
     });
 
     // 2. Broken JSON in AttributesJSON (only if value looks like JSON)
-    data.clients.forEach((row: any, i) => {
+    data.clients.forEach((row: any, i: number) => {
       const val = row.AttributesJSON;
-      if (val && val.trim() !== "") {
-        const trimmed = val.trim();
-        if (trimmed.startsWith("{") || trimmed.startsWith("[")) {
-          try {
-            JSON.parse(trimmed);
-          } catch {
-            newErrors.push({
-              entity: "clients",
-              rowIndex: i,
-              field: "AttributesJSON",
-              message: "Invalid JSON",
-            });
-          }
-        }
+      if (typeof val !== "string" || val.trim() === "") return;
+      try {
+        JSON.parse(val);
+      } catch {
+        newErrors.push({
+          entity: "clients",
+          rowIndex: i,
+          field: "AttributesJSON",
+          message: "Invalid JSON",
+        });
       }
     });
 

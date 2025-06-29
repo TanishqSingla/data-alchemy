@@ -7,11 +7,12 @@ import {
 } from "@tanstack/react-table";
 import { useData } from "../context/DataContext";
 import { EntityType } from "../lib/types";
-import { useMemo, useState } from "react";
+import { useMemo, useState, useRef, useEffect } from "react";
 import { exportToCSV, exportToXLSX } from "@/lib/export";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { buildAutoFixPrompt } from "@/lib/aiPrompts";
 import React from "react";
+import { createPortal } from "react-dom";
 
 interface Props {
   type: EntityType;
@@ -45,25 +46,110 @@ const InputCell = React.memo(function InputCell({ rowIndex, columnKey, type }: {
 
 // Row wrapper with error highlighting
 function DataRow({ row, type, children }: { row: any; type: EntityType; children: React.ReactNode }) {
-  const { errors } = useData();
+  const { errors, data, setEntityRows } = useData();
   const rowErrors = errors.filter((e) => e.entity === type && e.rowIndex === row.index);
   const hasErrors = rowErrors.length > 0;
+  const [popoverOpen, setPopoverOpen] = useState(false);
+  const [aiLoading, setAiLoading] = useState(false);
+  const [aiResult, setAiResult] = useState<string | null>(null);
+  const [suggestions, setSuggestions] = useState<string[] | null>(null);
+  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
+  const rowRef = useRef<HTMLTableRowElement>(null);
+  const [coords, setCoords] = useState<{top:number,left:number,height:number} | null>(null);
+
+  useEffect(() => {
+    if (rowRef.current) {
+      const rect = rowRef.current.getBoundingClientRect();
+      const scrollY = window.scrollY || document.documentElement.scrollTop;
+      setCoords({ top: rect.top + scrollY, left: rect.left, height: rect.height });
+    }
+  }, []);
+
+  const fetchSuggestions = async () => {
+    setLoadingSuggestions(true);
+    const currentVal = (data[type] as any)[row.index]?.[rowErrors[0].field] ?? "";
+    const prompt = `The value '${currentVal}' in column '${rowErrors[0].field}' has the error: ${rowErrors[0].message}.\nProvide up to 3 possible corrected values as a JSON array of strings.`;
+    try {
+      const res = await fetch("/api/ai-fix", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ prompt }) });
+      const resp = await res.json();
+      if (Array.isArray(resp.rows)) {
+        setSuggestions(resp.rows.slice(0,3).map(String));
+      } else {
+        setSuggestions(null);
+      }
+    } catch(err){ console.error(err); }
+    setLoadingSuggestions(false);
+  };
+
+  const handleAIFix = async (value: string) => {
+    setAiLoading(true);
+    setAiResult(null);
+    setEntityRows(type, (prevRows) => {
+      const newRows = [...prevRows];
+      newRows[row.index] = { ...newRows[row.index], [rowErrors[0].field]: value };
+      return newRows;
+    });
+    setAiResult(value);
+    setAiLoading(false);
+  };
+
+  const buttonNode = coords && createPortal(
+    <>
+      <button
+        className="rounded-full bg-blue-100 hover:bg-blue-200 text-blue-700 p-1 border border-blue-200 shadow-sm"
+        style={{
+          position: "fixed",
+          left: coords.left + window.scrollX - 24,
+          top: coords.top - window.scrollY + coords.height / 2 - 14,
+          minWidth: 28,
+          minHeight: 28,
+          zIndex: 1000,
+        }}
+        onClick={e => { e.stopPropagation(); setPopoverOpen(v=>!v); }}
+        title="AI Fix"
+      >
+        <span role="img" aria-label="AI">🤖</span>
+      </button>
+      {popoverOpen && createPortal(
+        <div
+          className="bg-white border rounded shadow-lg p-3 min-w-[180px] z-50"
+          style={{ position: "absolute", left: coords.left - 200, top: coords.top + coords.height / 2 - 60 }}
+          onClick={e=>e.stopPropagation()}
+        >
+          <div className="font-semibold mb-2 text-sm">AI Fix for <span className="font-mono">{rowErrors[0].field}</span></div>
+          <div className="text-xs text-gray-600 mb-2">{rowErrors[0].message}</div>
+          {!suggestions && (
+            <button className="px-2 py-1 rounded bg-blue-600 text-white text-xs disabled:opacity-50" disabled={loadingSuggestions} onClick={fetchSuggestions}>{loadingSuggestions?"Loading...":"Get AI Suggestions"}</button>
+          )}
+          {suggestions && (
+            <div className="space-y-1">
+              {suggestions.map((s,idx)=>(
+                <button key={idx} className="w-full text-left px-2 py-1 rounded border hover:bg-blue-50 text-xs" onClick={()=>handleAIFix(s)}>{s}</button>
+              ))}
+            </div>
+          )}
+          {aiResult && <div className="mt-2 text-xs text-green-700">Applied: <span className="font-mono">{String(aiResult)}</span></div>}
+          <button className="absolute top-1 right-2 text-gray-400 hover:text-gray-700" onClick={()=>setPopoverOpen(false)} title="Close">×</button>
+        </div>, document.body)}
+    </>, document.body);
 
   if (!hasErrors) {
     return <tr className="border-t">{children}</tr>;
   }
-
   const errorMessages = rowErrors.map((e) => `${e.field}: ${e.message}`).join("; ");
+  const mainError = rowErrors[0];
 
   return (
-    <tr 
-      className="border-t bg-red-50 hover:bg-red-100 transition-colors relative group"
-      title={`Validation errors: ${errorMessages}`}
-    >
-      {children}
-      {/* Error indicator */}
-      <div className="absolute -left-2 top-1/2 transform -translate-y-1/2 w-2 h-2 bg-red-500 rounded-full opacity-0 group-hover:opacity-100 transition-opacity"></div>
-    </tr>
+    <>
+      <tr
+        ref={rowRef}
+        className="border-t bg-red-50 hover:bg-red-100 transition-colors relative group"
+        title={`Validation errors: ${errorMessages}`}
+      >
+        {children}
+      </tr>
+      {buttonNode}
+    </>
   );
 }
 
@@ -84,6 +170,84 @@ function ReviewModal({ open, onClose, fixedRows, onApply }: { open: boolean; onC
   );
 }
 
+function AIFixModal({ open, onClose, errors, type, data, setEntityRows }: { open: boolean; onClose: () => void; errors: any[]; type: EntityType; data: any[]; setEntityRows: any }) {
+  const [loadingIdx, setLoadingIdx] = useState<number | null>(null);
+  const [aiResults, setAiResults] = useState<{ [k: number]: string }>({});
+
+  const handleAIFix = async (error: any, idx: number) => {
+    setLoadingIdx(idx);
+    setAiResults((prev) => ({ ...prev, [idx]: "" }));
+    const prompt = `You are a data cleaning assistant. The following row has an error in the '${error.field}' column: ${error.message}.\nRow: ${JSON.stringify(data[error.rowIndex])}.\nSuggest a corrected value for this field only, as a JSON string.`;
+    try {
+      const res = await fetch("/api/ai-fix", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ prompt }),
+      });
+      const result = await res.json();
+      if (result && result.value !== undefined) {
+        setAiResults((prev) => ({ ...prev, [idx]: result.value }));
+        setEntityRows(type, (prevRows: any[]) => {
+          const newRows = [...prevRows];
+          newRows[error.rowIndex] = { ...newRows[error.rowIndex], [error.field]: result.value };
+          return newRows;
+        });
+      } else {
+        setAiResults((prev) => ({ ...prev, [idx]: "No suggestion" }));
+      }
+    } catch (err) {
+      setAiResults((prev) => ({ ...prev, [idx]: "Error" }));
+      console.log(err);
+    } finally {
+      setLoadingIdx(null);
+    }
+  };
+
+  if (!open) return null;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-30">
+      <div className="bg-white rounded-lg shadow-lg p-6 min-w-[350px] max-w-[90vw] max-h-[80vh] overflow-auto">
+        <div className="flex justify-between items-center mb-4">
+          <h2 className="text-lg font-bold">AI Fix Errors</h2>
+          <button className="text-gray-400 hover:text-gray-700 text-xl" onClick={onClose} title="Close">×</button>
+        </div>
+        <table className="w-full text-sm mb-4">
+          <thead>
+            <tr className="bg-gray-50">
+              <th className="border px-2 py-1">Row</th>
+              <th className="border px-2 py-1">Column</th>
+              <th className="border px-2 py-1">Error</th>
+              <th className="border px-2 py-1">Action</th>
+            </tr>
+          </thead>
+          <tbody>
+            {errors.map((err, idx) => (
+              <tr key={idx}>
+                <td className="border px-2 py-1 text-center">{err.rowIndex + 1}</td>
+                <td className="border px-2 py-1 font-mono">{err.field}</td>
+                <td className="border px-2 py-1">{err.message}</td>
+                <td className="border px-2 py-1">
+                  <button
+                    className="px-2 py-1 rounded bg-blue-600 text-white text-xs disabled:opacity-50"
+                    onClick={() => handleAIFix(err, idx)}
+                    disabled={loadingIdx === idx}
+                  >
+                    {loadingIdx === idx ? "Fixing..." : "Fix with AI"}
+                  </button>
+                  {aiResults[idx] && (
+                    <div className="mt-1 text-xs text-green-700">Suggested: <span className="font-mono">{String(aiResults[idx])}</span></div>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        <button className="mt-2 px-4 py-1 rounded bg-gray-200 hover:bg-gray-300" onClick={onClose}>Close</button>
+      </div>
+    </div>
+  );
+}
+
 export function DataGrid({ type }: Props) {
   const { data, setEntityRows } = useData();
   const rows = data[type];
@@ -92,6 +256,7 @@ export function DataGrid({ type }: Props) {
   const [reviewOpen, setReviewOpen] = useState(false);
   const [aiLoading, setAiLoading] = useState(false);
   const [aiFixedRows, setAiFixedRows] = useState<any[] | null>(null);
+  const [aiModalOpen, setAIModalOpen] = useState(false);
 
   // column keys computed only when structure changes
   const columnKeys = useMemo(() => {
@@ -134,6 +299,14 @@ export function DataGrid({ type }: Props) {
 
   return (
     <div className="space-y-2">
+      <AIFixModal
+        open={aiModalOpen}
+        onClose={() => setAIModalOpen(false)}
+        errors={entityErrors}
+        type={type}
+        data={rows}
+        setEntityRows={setEntityRows}
+      />
       <ReviewModal
         open={reviewOpen}
         onClose={() => setReviewOpen(false)}
@@ -155,13 +328,6 @@ export function DataGrid({ type }: Props) {
           </div>
           <p className="text-sm text-yellow-700">
             Hover over highlighted rows to see specific issues. Fix the errors to proceed.
-            <button
-              className="ml-4 px-2 py-1 text-xs rounded bg-primary text-white disabled:opacity-50"
-              disabled={aiLoading}
-              onClick={handleAIFix}
-            >
-              {aiLoading ? "AI Fixing..." : "Auto-Fix with AI"}
-            </button>
           </p>
         </div>
       )}
