@@ -299,7 +299,7 @@ export function BusinessRules() {
                     required
                   />
                   <p className="text-xs text-gray-500 mt-1">
-                    Example: "Priority levels must be between 1 and 5. If outside this range, set to 3 as default."
+                    Example: &quot;Priority levels must be between 1 and 5. If outside this range, set to 3 as default.&quot;
                   </p>
                 </div>
 
@@ -322,7 +322,6 @@ export function BusinessRules() {
             </div>
           )}
 
-          {/* Rules List */}
           <div className="space-y-4">
             {filteredRules.length === 0 ? (
               <div className="text-center py-8 text-gray-500">
@@ -422,7 +421,7 @@ export function BusinessRules() {
             <h4 className="font-semibold text-blue-800 mb-2">💡 How to Use Business Rules</h4>
             <div className="text-sm text-blue-700 space-y-2">
               <p>• <strong>Rule Name:</strong> Give your rule a clear, descriptive name</p>
-              <p>• <strong>Entity Type:</strong> Choose which data type this rule applies to (or "All Entities")</p>
+              <p>• <strong>Entity Type:</strong> Choose which data type this rule applies to (or &quot;All Entities&quot;)</p>
               <p>• <strong>Field:</strong> Optionally specify a particular field, or leave blank for all fields</p>
               <p>• <strong>Priority:</strong> Higher priority rules (8-10) are applied first</p>
               <p>• <strong>Rule Description:</strong> Explain in plain English what the AI should do</p>

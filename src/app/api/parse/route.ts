@@ -1,7 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
-import { parseFile, detectEntityType } from "@/lib/parse";
+import { parseFile } from "@/lib/parse";
 import { schemas } from "@/lib/schema";
-import { EntityType } from "@/lib/types";
 
 export async function POST(req: NextRequest) {
   const formData = await req.formData();

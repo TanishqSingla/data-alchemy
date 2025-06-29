@@ -11,7 +11,6 @@ import { EntityType } from "../lib/types";
 import { useMemo, useState, useEffect } from "react";
 import { exportToCSV, exportToXLSX } from "@/lib/export";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
-import { buildAutoFixPrompt } from "@/lib/aiPrompts";
 import React from "react";
 import { X } from 'lucide-react'
 
@@ -19,13 +18,11 @@ interface Props {
   type: EntityType;
 }
 
-// Define the suggestion type
 interface AISuggestion {
   label: string;
   value: string;
 }
 
-// Separate cell component to avoid losing focus on re-renders
 const InputCell = React.memo(function InputCell({ rowIndex, columnKey, type }: { rowIndex: number; columnKey: string; type: EntityType }) {
   const { data, setEntityRows, errors } = useData();
   const rows = data[type] as any[];
@@ -51,7 +48,6 @@ const InputCell = React.memo(function InputCell({ rowIndex, columnKey, type }: {
   );
 });
 
-// Row wrapper with error highlighting
 function DataRow({ row, type, children }: { row: any; type: EntityType; children: React.ReactNode }) {
   const { errors, data, setEntityRows } = useData();
   const rowErrors = errors.filter((e) => e.entity === type && e.rowIndex === row.index);
@@ -61,7 +57,6 @@ function DataRow({ row, type, children }: { row: any; type: EntityType; children
     return <tr className="border-t">{children}</tr>;
   }
   const errorMessages = rowErrors.map((e) => `${e.field}: ${e.message}`).join("; ");
-  const mainError = rowErrors[0];
 
   return (
     <tr
@@ -378,22 +373,6 @@ export function DataGrid({ type }: Props) {
     columns,
     getCoreRowModel: getCoreRowModel(),
   });
-
-  async function handleAIFix() {
-    setAiLoading(true);
-    setReviewOpen(true);
-    setAiFixedRows(null);
-    const businessRules = getActiveRules(type);
-    const prompt = buildAutoFixPrompt(type, rows, entityErrors, businessRules);
-    const res = await fetch("/api/ai-fix", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ prompt }),
-    });
-    const data = await res.json();
-    setAiFixedRows(data.rows || []);
-    setAiLoading(false);
-  }
 
   if (rows.length === 0) return null;
 

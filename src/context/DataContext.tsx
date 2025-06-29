@@ -27,26 +27,6 @@ export function useData() {
 
 const emptyData: Dataset = { clients: [], workers: [], tasks: [] };
 
-async function aiFixRow(row) {
-  const prompt = `You are a data cleaning assistant. Fix this row: ${JSON.stringify(row)}`;
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": "Bearer YOUR_OPENAI_API_KEY" // Never expose this in production!
-    },
-    body: JSON.stringify({
-      model: "gpt-3.5-turbo",
-      messages: [{ role: "user", content: prompt }],
-      temperature: 0
-    })
-  });
-  const data = await response.json();
-  // Parse the AI's response as JSON
-  const fixedRow = JSON.parse(data.choices[0].message.content);
-  return fixedRow;
-}
-
 export function DataProvider({ children }: { children: ReactNode }) {
   const [data, setData] = useState<Dataset>(emptyData);
   const [errors, setErrors] = useState<ValidationError[]>([]);
@@ -97,7 +77,7 @@ export function DataProvider({ children }: { children: ReactNode }) {
 
     (Object.keys(idSets) as EntityType[]).forEach((type) => {
       const idKey = type === "clients" ? "ClientID" : type === "workers" ? "WorkerID" : "TaskID";
-      Object.entries(idSets[type]).forEach(([id, rowsIdx]) => {
+      Object.entries(idSets[type]).forEach(([_id, rowsIdx]) => {
         if (rowsIdx.length > 1) {
           rowsIdx.forEach((rIdx) =>
             newErrors.push({
