@@ -7,12 +7,11 @@ import {
 } from "@tanstack/react-table";
 import { useData } from "../context/DataContext";
 import { EntityType } from "../lib/types";
-import { useMemo, useState, useRef, useEffect } from "react";
+import { useMemo, useState } from "react";
 import { exportToCSV, exportToXLSX } from "@/lib/export";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { buildAutoFixPrompt } from "@/lib/aiPrompts";
 import React from "react";
-import { createPortal } from "react-dom";
 
 interface Props {
   type: EntityType;
@@ -49,89 +48,6 @@ function DataRow({ row, type, children }: { row: any; type: EntityType; children
   const { errors, data, setEntityRows } = useData();
   const rowErrors = errors.filter((e) => e.entity === type && e.rowIndex === row.index);
   const hasErrors = rowErrors.length > 0;
-  const [popoverOpen, setPopoverOpen] = useState(false);
-  const [aiLoading, setAiLoading] = useState(false);
-  const [aiResult, setAiResult] = useState<string | null>(null);
-  const [suggestions, setSuggestions] = useState<string[] | null>(null);
-  const [loadingSuggestions, setLoadingSuggestions] = useState(false);
-  const rowRef = useRef<HTMLTableRowElement>(null);
-  const [coords, setCoords] = useState<{top:number,left:number,height:number} | null>(null);
-
-  useEffect(() => {
-    if (rowRef.current) {
-      const rect = rowRef.current.getBoundingClientRect();
-      const scrollY = window.scrollY || document.documentElement.scrollTop;
-      setCoords({ top: rect.top + scrollY, left: rect.left, height: rect.height });
-    }
-  }, []);
-
-  const fetchSuggestions = async () => {
-    setLoadingSuggestions(true);
-    const currentVal = (data[type] as any)[row.index]?.[rowErrors[0].field] ?? "";
-    const prompt = `The value '${currentVal}' in column '${rowErrors[0].field}' has the error: ${rowErrors[0].message}.\nProvide up to 3 possible corrected values as a JSON array of strings.`;
-    try {
-      const res = await fetch("/api/ai-fix", { method: "POST", headers: {"Content-Type":"application/json"}, body: JSON.stringify({ prompt }) });
-      const resp = await res.json();
-      if (Array.isArray(resp.rows)) {
-        setSuggestions(resp.rows.slice(0,3).map(String));
-      } else {
-        setSuggestions(null);
-      }
-    } catch(err){ console.error(err); }
-    setLoadingSuggestions(false);
-  };
-
-  const handleAIFix = async (value: string) => {
-    setAiLoading(true);
-    setAiResult(null);
-    setEntityRows(type, (prevRows) => {
-      const newRows = [...prevRows];
-      newRows[row.index] = { ...newRows[row.index], [rowErrors[0].field]: value };
-      return newRows;
-    });
-    setAiResult(value);
-    setAiLoading(false);
-  };
-
-  const buttonNode = coords && createPortal(
-    <>
-      <button
-        className="rounded-full bg-blue-100 hover:bg-blue-200 text-blue-700 p-1 border border-blue-200 shadow-sm"
-        style={{
-          position: "fixed",
-          left: coords.left + window.scrollX - 24,
-          top: coords.top - window.scrollY + coords.height / 2 - 14,
-          minWidth: 28,
-          minHeight: 28,
-          zIndex: 1000,
-        }}
-        onClick={e => { e.stopPropagation(); setPopoverOpen(v=>!v); }}
-        title="AI Fix"
-      >
-        <span role="img" aria-label="AI">🤖</span>
-      </button>
-      {popoverOpen && createPortal(
-        <div
-          className="bg-white border rounded shadow-lg p-3 min-w-[180px] z-50"
-          style={{ position: "absolute", left: coords.left - 200, top: coords.top + coords.height / 2 - 60 }}
-          onClick={e=>e.stopPropagation()}
-        >
-          <div className="font-semibold mb-2 text-sm">AI Fix for <span className="font-mono">{rowErrors[0].field}</span></div>
-          <div className="text-xs text-gray-600 mb-2">{rowErrors[0].message}</div>
-          {!suggestions && (
-            <button className="px-2 py-1 rounded bg-blue-600 text-white text-xs disabled:opacity-50" disabled={loadingSuggestions} onClick={fetchSuggestions}>{loadingSuggestions?"Loading...":"Get AI Suggestions"}</button>
-          )}
-          {suggestions && (
-            <div className="space-y-1">
-              {suggestions.map((s,idx)=>(
-                <button key={idx} className="w-full text-left px-2 py-1 rounded border hover:bg-blue-50 text-xs" onClick={()=>handleAIFix(s)}>{s}</button>
-              ))}
-            </div>
-          )}
-          {aiResult && <div className="mt-2 text-xs text-green-700">Applied: <span className="font-mono">{String(aiResult)}</span></div>}
-          <button className="absolute top-1 right-2 text-gray-400 hover:text-gray-700" onClick={()=>setPopoverOpen(false)} title="Close">×</button>
-        </div>, document.body)}
-    </>, document.body);
 
   if (!hasErrors) {
     return <tr className="border-t">{children}</tr>;
@@ -140,16 +56,12 @@ function DataRow({ row, type, children }: { row: any; type: EntityType; children
   const mainError = rowErrors[0];
 
   return (
-    <>
-      <tr
-        ref={rowRef}
-        className="border-t bg-red-50 hover:bg-red-100 transition-colors relative group"
-        title={`Validation errors: ${errorMessages}`}
-      >
-        {children}
-      </tr>
-      {buttonNode}
-    </>
+    <tr
+      className="border-t bg-red-50 hover:bg-red-100 transition-colors relative group"
+      title={`Validation errors: ${errorMessages}`}
+    >
+      {children}
+    </tr>
   );
 }
 
@@ -248,6 +160,72 @@ function AIFixModal({ open, onClose, errors, type, data, setEntityRows }: { open
   );
 }
 
+function ActionCell({ rowIndex, type }: { rowIndex: number; type: EntityType }) {
+  const { errors, data, setEntityRows } = useData();
+  const cellErrors = errors.filter(e => e.entity === type && e.rowIndex === rowIndex);
+  const hasError = cellErrors.length > 0;
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [suggestions, setSuggestions] = useState<string[] | null>(null);
+
+  if (!hasError) return null;
+
+  const mainError = cellErrors[0];
+
+  // If the error is for AttributesJSON and the value is plain text, add a suggestion
+  let plainTextSuggestion: string | null = null;
+  if (mainError.field === 'AttributesJSON') {
+    const val = (data[type] as any)[rowIndex]?.[mainError.field];
+    if (typeof val === 'string' && val.trim() && (val.trim()[0] !== '{' && val.trim()[0] !== '[')) {
+      plainTextSuggestion = JSON.stringify({ message: val.trim() });
+    }
+  }
+
+  const fetchSuggestions = async () => {
+    setLoading(true);
+    const currentVal = (data[type] as any)[rowIndex]?.[mainError.field] ?? "";
+    const prompt = `The value '${currentVal}' in column '${mainError.field}' has the error: ${mainError.message}.\nProvide up to 3 possible corrected values as a JSON array of strings.`;
+    try {
+      const res = await fetch('/api/ai-fix', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({prompt})});
+      const json = await res.json();
+      if(Array.isArray(json.rows)) setSuggestions(json.rows.map(String).slice(0,3));
+    } catch(err){ console.error(err); }
+    setLoading(false);
+  };
+
+  const applySuggestion = (val: string) => {
+    setEntityRows(type, prev => {
+      const next = [...prev];
+      next[rowIndex] = { ...next[rowIndex], [mainError.field]: val };
+      return next;
+    });
+    setOpen(false);
+  };
+
+  return (
+    <div className="relative">
+      <button onClick={()=>{setOpen(o=>!o); if(!suggestions) fetchSuggestions();}} title="AI suggestions" className="text-blue-600 hover:text-blue-800">
+        🤖
+      </button>
+      {open && (
+        <div className="absolute z-50 left-6 top-0 bg-white border rounded shadow-md p-2 min-w-[160px]">
+          {loading && <div className="text-xs text-gray-500">Loading...</div>}
+          {suggestions && suggestions.map((s,i)=>(
+            <button key={i} className="block w-full text-left text-xs px-2 py-1 rounded hover:bg-blue-50" onClick={()=>applySuggestion(s)}>{s}</button>
+          ))}
+          {plainTextSuggestion && (
+            <button className="block w-full text-left text-xs px-2 py-1 rounded hover:bg-blue-50 border" onClick={()=>applySuggestion(plainTextSuggestion!)}>
+              Wrap as JSON: <span className="font-mono">{plainTextSuggestion}</span>
+            </button>
+          )}
+          {!loading && !suggestions && <div className="text-xs text-gray-500">No suggestions</div>}
+          <button className="absolute top-0 right-1 text-gray-400 text-sm" onClick={()=>setOpen(false)}>×</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function DataGrid({ type }: Props) {
   const { data, setEntityRows } = useData();
   const rows = data[type];
@@ -265,13 +243,18 @@ export function DataGrid({ type }: Props) {
   }, [type, rows.length > 0 ? Object.keys(rows[0]).join() : ""]);
 
   const columns = useMemo<ColumnDef<any, any>[]>(() => {
-    return columnKeys.map((key) => ({
+    const actionsCol: ColumnDef<any, any> = {
+      id: 'actions',
+      header: '',
+      size: 50,
+      cell: ({ row }: { row: any }) => <ActionCell rowIndex={row.index} type={type} />,
+    };
+    const dataCols = columnKeys.map((key) => ({
       accessorKey: key,
       header: key,
-      cell: ({ row }) => (
-        <InputCell rowIndex={row.index} columnKey={key} type={type} />
-      ),
+      cell: ({ row }: { row: any }) => <InputCell rowIndex={row.index} columnKey={key} type={type} />,
     }));
+    return [actionsCol, ...dataCols];
   }, [columnKeys, type]);
 
   const table = useReactTable({
