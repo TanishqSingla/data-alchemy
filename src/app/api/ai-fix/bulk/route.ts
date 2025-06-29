@@ -1,19 +1,21 @@
 import { NextRequest, NextResponse } from "next/server";
+import { buildAutoFixPrompt } from "@/lib/aiPrompts";
 
 interface BulkAIFixRequest {
   entity: string;
   rows: any[];
   errors: { rowIndex: number; field: string; message: string }[];
+  businessRules?: any[];
 }
 
 export async function POST(req: NextRequest) {
-  const { entity, rows, errors }: BulkAIFixRequest = await req.json();
+  const { entity, rows, errors, businessRules }: BulkAIFixRequest = await req.json();
   const apiKey = process.env.GOOGLE_API_KEY;
   if (!apiKey) {
     return NextResponse.json({ error: "No Google API key set" }, { status: 500 });
   }
 
-  const prompt = `You are a data cleaning assistant. Your job is to fix errors in a ${entity} table.\n\nHere is the table data (as JSON array):\n${JSON.stringify(rows, null, 2)}\n\nHere are the validation errors (with row numbers and fields):\n${JSON.stringify(errors, null, 2)}\n\nFor each row with errors, suggest a corrected version.\n- If a value is missing, fill it with a plausible guess.\n- If a value is malformed (e.g. not a number, invalid JSON), fix the format.\n- If an ID is duplicated, make it unique by appending a suffix.\n- If a reference is unknown, try to match it to the closest valid value or remove it.\n- If a value is out of range, bring it into the valid range.\n- If a JSON field is broken, repair the JSON.\n\nReturn ONLY the corrected table as a JSON array, with the same number of rows and columns as the input.`;
+  const prompt = buildAutoFixPrompt(entity, rows, errors, businessRules || []);
 
   const geminiReqBody = {
     contents: [{

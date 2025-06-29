@@ -1,4 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
+import { buildInlineFixPrompt } from "@/lib/aiPrompts";
+import { BusinessRule } from "@/lib/types";
 
 // Strongly typed suggestion structure
 interface AISuggestion {
@@ -11,17 +13,22 @@ interface AIResponse {
 }
 
 export async function POST(req: NextRequest) {
-  const { prompt } = await req.json();
+  const { prompt, field, value, entity, businessRules } = await req.json();
   const apiKey = process.env.GOOGLE_API_KEY;
   if (!apiKey) {
     return NextResponse.json({ error: "No Google API key set" }, { status: 500 });
   }
 
+  // Use the new prompt builder if field, value, and entity are provided
+  const finalPrompt = field && value && entity 
+    ? buildInlineFixPrompt(field, value, entity, businessRules || [])
+    : prompt;
+
   // System prompt with explicit structure
   const geminiReqBody = {
     contents: [{
       parts: [{
-        text: prompt
+        text: finalPrompt
       }]
     }],
     system_instruction: {

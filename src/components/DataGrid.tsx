@@ -6,6 +6,7 @@ import {
   ColumnDef,
 } from "@tanstack/react-table";
 import { useData } from "../context/DataContext";
+import { useBusinessRules } from "../context/BusinessRulesContext";
 import { EntityType } from "../lib/types";
 import { useMemo, useState, useEffect } from "react";
 import { exportToCSV, exportToXLSX } from "@/lib/export";
@@ -198,51 +199,44 @@ function AIFixModal({ open, onClose, errors, type, data, setEntityRows }: { open
 
   if (!open) return null;
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-30">
-      <div className="bg-white rounded-lg shadow-lg p-6 min-w-[350px] max-w-[90vw] max-h-[80vh] overflow-auto">
-        <div className="flex justify-between items-center mb-4">
-          <h2 className="text-lg font-bold">AI Fix Errors</h2>
-          <button className="text-gray-400 hover:text-gray-700 text-xl" onClick={onClose} title="Close">×</button>
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent>
+        <DialogTitle>AI Fix Individual Errors</DialogTitle>
+        <div className="max-h-96 overflow-auto my-4">
+          {errors.map((error, idx) => (
+            <div key={idx} className="border rounded p-2 mb-2">
+              <div className="flex justify-between items-start">
+                <div>
+                  <div className="font-semibold">Row {error.rowIndex + 1}, {error.field}</div>
+                  <div className="text-sm text-red-600">{error.message}</div>
+                </div>
+                <button
+                  onClick={() => handleAIFix(error, idx)}
+                  disabled={loadingIdx === idx}
+                  className="px-3 py-1 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {loadingIdx === idx ? "Fixing..." : "Fix with AI"}
+                </button>
+              </div>
+              {aiResults[idx] && (
+                <div className="mt-2 text-sm">
+                  <span className="text-gray-600">Result:</span> {aiResults[idx]}
+                </div>
+              )}
+            </div>
+          ))}
         </div>
-        <table className="w-full text-sm mb-4">
-          <thead>
-            <tr className="bg-gray-50">
-              <th className="border px-2 py-1">Row</th>
-              <th className="border px-2 py-1">Column</th>
-              <th className="border px-2 py-1">Error</th>
-              <th className="border px-2 py-1">Action</th>
-            </tr>
-          </thead>
-          <tbody>
-            {errors.map((err, idx) => (
-              <tr key={idx}>
-                <td className="border px-2 py-1 text-center">{err.rowIndex + 1}</td>
-                <td className="border px-2 py-1 font-mono">{err.field}</td>
-                <td className="border px-2 py-1">{err.message}</td>
-                <td className="border px-2 py-1">
-                  <button
-                    className="px-2 py-1 rounded bg-blue-600 text-white text-xs disabled:opacity-50"
-                    onClick={() => handleAIFix(err, idx)}
-                    disabled={loadingIdx === idx}
-                  >
-                    {loadingIdx === idx ? "Fixing..." : "Fix with AI"}
-                  </button>
-                  {aiResults[idx] && (
-                    <div className="mt-1 text-xs text-green-700">Suggested: <span className="font-mono">{String(aiResults[idx])}</span></div>
-                  )}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-        <button className="mt-2 px-4 py-1 rounded bg-gray-200 hover:bg-gray-300" onClick={onClose}>Close</button>
-      </div>
-    </div>
+        <div className="flex justify-end">
+          <button className="px-3 py-1 rounded bg-muted border" onClick={onClose}>Close</button>
+        </div>
+      </DialogContent>
+    </Dialog>
   );
 }
 
 function ActionCell({ rowIndex, type }: { rowIndex: number; type: EntityType }) {
   const { errors, data, setEntityRows } = useData();
+  const { getActiveRules } = useBusinessRules();
   const cellErrors = errors.filter(e => e.entity === type && e.rowIndex === rowIndex);
   const hasError = cellErrors.length > 0;
   const [open, setOpen] = useState(false);
@@ -265,9 +259,19 @@ function ActionCell({ rowIndex, type }: { rowIndex: number; type: EntityType }) 
   const fetchSuggestions = async () => {
     setLoading(true);
     const rowData = (data[type] as any)[rowIndex];
-    const prompt = `The field '${mainError.field}' in the following row has an error: ${mainError.message}.\nRow data: ${JSON.stringify(rowData)}.\n\nProvide up to 3 corrected values for the '${mainError.field}' field as a JSON object: { \"choices\": [ { \"label\": string, \"value\": string } ] }.`;
+    const businessRules = getActiveRules(type);
+    
     try {
-      const res = await fetch('/api/ai-fix', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({prompt})});
+      const res = await fetch('/api/ai-fix', {
+        method: 'POST', 
+        headers: {'Content-Type': 'application/json'}, 
+        body: JSON.stringify({
+          field: mainError.field,
+          value: rowData[mainError.field] || "",
+          entity: type,
+          businessRules
+        })
+      });
       const json = await res.json();
       if(Array.isArray(json.choices)) setSuggestions(json.choices);
     } catch(err){ console.error(err); }
@@ -339,6 +343,7 @@ function ActionCell({ rowIndex, type }: { rowIndex: number; type: EntityType }) 
 
 export function DataGrid({ type }: Props) {
   const { data, setEntityRows } = useData();
+  const { getActiveRules } = useBusinessRules();
   const rows = data[type];
   const { errors } = useData();
   const entityErrors = errors.filter((e) => e.entity === type);
@@ -378,7 +383,8 @@ export function DataGrid({ type }: Props) {
     setAiLoading(true);
     setReviewOpen(true);
     setAiFixedRows(null);
-    const prompt = buildAutoFixPrompt(type, rows, entityErrors);
+    const businessRules = getActiveRules(type);
+    const prompt = buildAutoFixPrompt(type, rows, entityErrors, businessRules);
     const res = await fetch("/api/ai-fix", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -451,10 +457,16 @@ export function DataGrid({ type }: Props) {
               setAiLoading(true);
               setReviewOpen(true);
               setAiFixedRows(null);
+              const businessRules = getActiveRules(type);
               const res = await fetch("/api/ai-fix/bulk", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ entity: type, rows, errors: entityErrors }),
+                body: JSON.stringify({ 
+                  entity: type, 
+                  rows, 
+                  errors: entityErrors,
+                  businessRules
+                }),
               });
               const data = await res.json();
               setAiFixedRows(data.rows || []);

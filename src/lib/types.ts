@@ -33,4 +33,25 @@ export interface Dataset {
   clients: Client[];
   workers: Worker[];
   tasks: Task[];
+}
+
+// Business Rules Types
+export interface BusinessRule {
+  id: string;
+  name: string;
+  description: string;
+  entityType: EntityType | "all";
+  field?: string;
+  rule: string;
+  isActive: boolean;
+  priority: number; // 1-10, higher is more important
+  createdAt: Date;
+  updatedAt: Date;
+}
+
+export interface BusinessRuleCategory {
+  id: string;
+  name: string;
+  description: string;
+  color: string;
 } 
