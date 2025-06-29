@@ -454,7 +454,7 @@ export function DataGrid({ type }: Props) {
             disabled={aiLoading}
             title="Let AI fix all errors in one go!"
           >
-            <span role="img" aria-label="magic">✨</span> I'm feeling lucky
+            <span role="img" aria-label="magic">✨</span> I&apos;m feeling lucky
           </button>
         )}
       </div>
