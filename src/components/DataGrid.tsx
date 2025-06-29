@@ -72,17 +72,77 @@ function DataRow({ row, type, children }: { row: any; type: EntityType; children
   );
 }
 
-function ReviewModal({ open, onClose, fixedRows, onApply }: { open: boolean; onClose: () => void; fixedRows: any[]; onApply: () => void }) {
+function getRowDiffs(original: any[], fixed: any[]): { rowIndex: number, changes: { field: string, before: any, after: any }[] }[] {
+  const diffs: { rowIndex: number, changes: { field: string, before: any, after: any }[] }[] = [];
+  for (let i = 0; i < original.length; ++i) {
+    const orig = original[i];
+    const fix = fixed[i];
+    if (!orig || !fix) continue;
+    const changes = Object.keys(fix).filter(k => fix[k] !== orig[k]).map(field => ({
+      field,
+      before: orig[field],
+      after: fix[field],
+    }));
+    if (changes.length > 0) diffs.push({ rowIndex: i, changes });
+  }
+  return diffs;
+}
+
+function ReviewModal({ open, onClose, fixedRows, onApply, loading, originalRows }: {
+  open: boolean;
+  onClose: () => void;
+  fixedRows: any[];
+  onApply: (selected: number[]) => void;
+  loading?: boolean;
+  originalRows: any[];
+}) {
+  const diffs = useMemo(() => getRowDiffs(originalRows, fixedRows), [originalRows, fixedRows]);
+  const [selected, setSelected] = useState<number[]>(diffs.map(d => d.rowIndex));
+
+  const toggle = (rowIdx: number) => {
+    setSelected(sel => sel.includes(rowIdx) ? sel.filter(i => i !== rowIdx) : [...sel, rowIdx]);
+  };
+
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent>
         <DialogTitle>Review AI Suggestions</DialogTitle>
         <div className="max-h-96 overflow-auto my-4">
-          <pre className="text-xs bg-muted p-2 rounded whitespace-pre-wrap">{JSON.stringify(fixedRows, null, 2)}</pre>
+          {loading ? (
+            <div className="flex items-center justify-center py-8">
+              <span className="animate-spin mr-2">🔄</span>
+              <span className="text-sm text-gray-600">AI is working its magic...</span>
+            </div>
+          ) : diffs.length === 0 ? (
+            <div className="text-center text-gray-500 py-8">No changes suggested by AI.</div>
+          ) : (
+            <ul className="space-y-4">
+              {diffs.map(({ rowIndex, changes }) => (
+                <li key={rowIndex} className="border rounded p-2 flex items-start gap-2">
+                  <input
+                    type="checkbox"
+                    checked={selected.includes(rowIndex)}
+                    onChange={() => toggle(rowIndex)}
+                    className="mt-1"
+                  />
+                  <div>
+                    <div className="font-semibold mb-1">Row {rowIndex + 1}</div>
+                    <ul className="text-xs space-y-1">
+                      {changes.map(({ field, before, after }) => (
+                        <li key={field}>
+                          <span className="font-mono text-gray-600">{field}</span>: <span className="line-through text-red-500">{String(before)}</span> → <span className="text-green-700 font-mono">{String(after)}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
         </div>
         <div className="flex gap-2 justify-end">
           <button className="px-3 py-1 rounded bg-muted border" onClick={onClose}>Cancel</button>
-          <button className="px-3 py-1 rounded bg-primary text-white" onClick={onApply}>Apply Fixes</button>
+          <button className="px-3 py-1 rounded bg-primary text-white" onClick={() => onApply(selected)} disabled={loading || diffs.length === 0 || selected.length === 0}>Apply Fixes</button>
         </div>
       </DialogContent>
     </Dialog>
@@ -331,10 +391,15 @@ export function DataGrid({ type }: Props) {
         open={reviewOpen}
         onClose={() => setReviewOpen(false)}
         fixedRows={aiFixedRows || []}
-        onApply={() => {
-          if (aiFixedRows) setEntityRows(type, aiFixedRows);
+        onApply={(selected) => {
+          if (aiFixedRows) {
+            // Only apply selected fixes
+            setEntityRows(type, rows.map((row, i) => selected.includes(i) ? aiFixedRows[i] : row));
+          }
           setReviewOpen(false);
         }}
+        loading={aiLoading}
+        originalRows={rows}
       />
       {entityErrors.length > 0 && (
         <div className="bg-yellow-50 border border-yellow-200 rounded-md p-3">
@@ -364,6 +429,28 @@ export function DataGrid({ type }: Props) {
         >
           Export XLSX
         </button>
+        {entityErrors.length > 0 && (
+          <button
+            className="px-3 py-1 text-xs rounded bg-blue-600 text-white hover:bg-blue-700 border flex items-center gap-1"
+            onClick={async () => {
+              setAiLoading(true);
+              setReviewOpen(true);
+              setAiFixedRows(null);
+              const res = await fetch("/api/ai-fix/bulk", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ entity: type, rows, errors: entityErrors }),
+              });
+              const data = await res.json();
+              setAiFixedRows(data.rows || []);
+              setAiLoading(false);
+            }}
+            disabled={aiLoading}
+            title="Let AI fix all errors in one go!"
+          >
+            <span role="img" aria-label="magic">✨</span> I'm feeling lucky
+          </button>
+        )}
       </div>
       <div className="overflow-x-auto border rounded-md">
         <table className="min-w-full text-sm">
