@@ -12,9 +12,16 @@ import { exportToCSV, exportToXLSX } from "@/lib/export";
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
 import { buildAutoFixPrompt } from "@/lib/aiPrompts";
 import React from "react";
+import { X } from 'lucide-react'
 
 interface Props {
   type: EntityType;
+}
+
+// Define the suggestion type
+interface AISuggestion {
+  label: string;
+  value: string;
 }
 
 // Separate cell component to avoid losing focus on re-renders
@@ -166,7 +173,7 @@ function ActionCell({ rowIndex, type }: { rowIndex: number; type: EntityType }) 
   const hasError = cellErrors.length > 0;
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
-  const [suggestions, setSuggestions] = useState<string[] | null>(null);
+  const [suggestions, setSuggestions] = useState<AISuggestion[] | null>(null);
 
   if (!hasError) return null;
 
@@ -183,12 +190,12 @@ function ActionCell({ rowIndex, type }: { rowIndex: number; type: EntityType }) 
 
   const fetchSuggestions = async () => {
     setLoading(true);
-    const currentVal = (data[type] as any)[rowIndex]?.[mainError.field] ?? "";
-    const prompt = `The value '${currentVal}' in column '${mainError.field}' has the error: ${mainError.message}.\nProvide up to 3 possible corrected values as a JSON array of strings.`;
+    const rowData = (data[type] as any)[rowIndex];
+    const prompt = `The field '${mainError.field}' in the following row has an error: ${mainError.message}.\nRow data: ${JSON.stringify(rowData)}.\n\nProvide up to 3 corrected values for the '${mainError.field}' field as a JSON object: { \"choices\": [ { \"label\": string, \"value\": string } ] }.`;
     try {
       const res = await fetch('/api/ai-fix', {method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({prompt})});
       const json = await res.json();
-      if(Array.isArray(json.rows)) setSuggestions(json.rows.map(String).slice(0,3));
+      if(Array.isArray(json.choices)) setSuggestions(json.choices);
     } catch(err){ console.error(err); }
     setLoading(false);
   };
@@ -204,22 +211,52 @@ function ActionCell({ rowIndex, type }: { rowIndex: number; type: EntityType }) 
 
   return (
     <div className="relative">
-      <button onClick={()=>{setOpen(o=>!o); if(!suggestions) fetchSuggestions();}} title="AI suggestions" className="text-blue-600 hover:text-blue-800">
+      <button onClick={()=>{setOpen(o=>!o); if(!suggestions) fetchSuggestions();}} title="AI suggestions" className="text-xl">
         🤖
       </button>
       {open && (
-        <div className="absolute z-50 left-6 top-0 bg-white border rounded shadow-md p-2 min-w-[160px]">
-          {loading && <div className="text-xs text-gray-500">Loading...</div>}
-          {suggestions && suggestions.map((s,i)=>(
-            <button key={i} className="block w-full text-left text-xs px-2 py-1 rounded hover:bg-blue-50" onClick={()=>applySuggestion(s)}>{s}</button>
-          ))}
-          {plainTextSuggestion && (
-            <button className="block w-full text-left text-xs px-2 py-1 rounded hover:bg-blue-50 border" onClick={()=>applySuggestion(plainTextSuggestion!)}>
-              Wrap as JSON: <span className="font-mono">{plainTextSuggestion}</span>
+        <div className="absolute z-50 left-8 top-0 bg-white border rounded-lg shadow-xl p-3 min-w-[280px] text-sm">
+          <div className="flex justify-between items-center mb-2">
+            <h4 className="font-semibold">Fix suggestion</h4>
+            <button
+              onClick={() => setOpen(false)}
+              className="p-1 rounded-full hover:bg-gray-200 flex items-center justify-center w-6 h-6"
+              title="Close"
+            >
+              <span className="font-bold text-gray-600"><X /></span>
             </button>
-          )}
-          {!loading && !suggestions && <div className="text-xs text-gray-500">No suggestions</div>}
-          <button className="absolute top-0 right-1 text-gray-400 text-sm" onClick={()=>setOpen(false)}>×</button>
+          </div>
+          
+          <div className="flex flex-col gap-2">
+            {loading && <div className="text-xs text-gray-500 px-2 py-1">Loading suggestions...</div>}
+            
+            {plainTextSuggestion && (
+              <>
+                <div>
+                  <h5 className="text-xs text-gray-500 font-semibold mb-1 px-2">Quick Fix</h5>
+                  <button className="block w-full text-left text-xs px-2 py-1.5 rounded hover:bg-blue-50 border" onClick={()=>applySuggestion(plainTextSuggestion!)}>
+                    Wrap as JSON: <span className="font-mono bg-gray-100 p-1 rounded">{plainTextSuggestion}</span>
+                  </button>
+                </div>
+                {(suggestions && suggestions.length > 0) && <hr className="my-1"/>}
+              </>
+            )}
+
+            {suggestions && suggestions.length > 0 && (
+              <div>
+                <h5 className="text-xs text-gray-500 font-semibold mb-1 px-2">AI Suggestions</h5>
+                {suggestions.map((s,i)=>(
+                  <button key={i} className="block w-full text-left text-xs px-2 py-1.5 rounded hover:bg-blue-50" onClick={()=>applySuggestion(s.value)}>
+                    <span className="font-mono bg-gray-100 p-1 rounded">{s.label}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+            
+            {!loading && !suggestions && !plainTextSuggestion && (
+              <div className="text-xs text-gray-500 px-2 py-1">No suggestions available.</div>
+            )}
+          </div>
         </div>
       )}
     </div>

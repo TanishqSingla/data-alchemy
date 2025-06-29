@@ -59,7 +59,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
   };
 
   const validateAll = () => {
-    console.log('Validating data:', data); // Debug: log current data
     const newErrors: ValidationError[] = [];
 
     (Object.keys(data) as EntityType[]).forEach((type) => {
@@ -164,13 +163,11 @@ export function DataProvider({ children }: { children: ReactNode }) {
       }
     });
 
-    console.log(data.tasks)
     const taskIds = new Set(data.tasks.map((t: any) => t.TaskID));
     data.clients.forEach((row: any, i) => {
       const listStr = row.RequestedTaskIDs as string;
       if (!listStr) return;
       const ids = listStr.split(/[,;]/).map((s: string) => s.trim()).filter(Boolean);
-      console.log(ids);
       ids.forEach((id) => {
         if (!taskIds.has(id)) {
           newErrors.push({
@@ -184,7 +181,6 @@ export function DataProvider({ children }: { children: ReactNode }) {
     });
 
     setErrors(newErrors);
-    console.log('Validation errors:', newErrors); // Debug: log found errors
   };
 
   useEffect(() => {
